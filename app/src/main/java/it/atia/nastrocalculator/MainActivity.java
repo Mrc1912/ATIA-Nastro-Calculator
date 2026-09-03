@@ -1,152 +1,64 @@
 package it.atia.nastrocalculator;
 
 import android.app.Activity;
-import android.graphics.Color;
-import android.graphics.Typeface;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.*;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
-import android.text.InputType;
-import android.view.Gravity;
-import android.view.View;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
-import android.widget.Toast;
+import android.text.*;
+import android.view.*;
+import android.widget.*;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private EditText motorRpm, reduction, diameterMm, beltLengthMm, targetSpeed;
-    private TextView output;
+  static final int BLACK=Color.BLACK, PANEL=Color.rgb(20,20,20), ORANGE=Color.rgb(255,100,0);
+  EditText motor, reduction, diameter, length, target; TextView rollerOut,speedOut,timeOut,ratioOut;
+  BeltView belt; SharedPreferences prefs; boolean internal;
 
-    @Override public void onCreate(Bundle state) {
-        super.onCreate(state);
-        setContentView(buildUi());
-    }
+  @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("atia_values",MODE_PRIVATE);setContentView(ui());watch();calculate();}
+  @Override protected void onPause(){super.onPause();prefs.edit().putString("motor",s(motor)).putString("reduction",s(reduction)).putString("diameter",s(diameter)).putString("length",s(length)).putString("target",s(target)).apply();}
 
-    private View buildUi() {
-        int pad = dp(18);
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.rgb(244,247,250));
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, pad, pad, pad);
-        scroll.addView(root);
+  View ui(){
+    ScrollView sv=new ScrollView(this);sv.setFillViewport(true);sv.setBackgroundColor(BLACK);
+    LinearLayout root=column();root.setPadding(dp(18),dp(18),dp(18),dp(28));sv.addView(root);
+    ImageView logo=new ImageView(this);logo.setImageResource(R.drawable.atia_logo);logo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);root.addView(logo,new LinearLayout.LayoutParams(-1,dp(112)));
+    TextView title=txt("NASTRO CALCULATOR",22,Color.WHITE,true);title.setGravity(17);title.setLetterSpacing(.1f);root.addView(title);
+    TextView sub=txt("SIMULAZIONE E CALCOLO IN TEMPO REALE",11,ORANGE,true);sub.setGravity(17);sub.setLetterSpacing(.08f);sub.setPadding(0,dp(4),0,dp(14));root.addView(sub);
+    belt=new BeltView();root.addView(belt,new LinearLayout.LayoutParams(-1,dp(170)));
+    root.addView(section("PARAMETRI MODIFICABILI"));
+    motor=field(root,"GIRI MOTORE","rpm","1400","motor");
+    reduction=field(root,"RAPPORTO DI RIDUZIONE","1 :","30","reduction");
+    diameter=field(root,"DIAMETRO RULLO","mm","80","diameter");
+    length=field(root,"LUNGHEZZA NASTRO","mm","1000","length");
+    target=field(root,"VELOCITÀ DESIDERATA","m/min","","target");
+    Button button=new Button(this);button.setText("RICAVA IL RAPPORTO DALLA VELOCITÀ");button.setTextColor(BLACK);button.setTextSize(12);button.setTypeface(Typeface.DEFAULT,1);button.setBackground(box(ORANGE,ORANGE,12));button.setOnClickListener(v->requiredRatio());
+    LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,dp(50));bp.setMargins(0,dp(4),0,dp(16));root.addView(button,bp);
+    root.addView(section("RISULTATI LIVE"));
+    LinearLayout r1=row();rollerOut=result(r1,"GIRI RULLO","— rpm");speedOut=result(r1,"VELOCITÀ","— m/min");root.addView(r1);
+    LinearLayout r2=row();timeOut=result(r2,"PERCORRENZA","— s");ratioOut=result(r2,"RAPPORTO","1 : —");root.addView(r2);
+    TextView note=txt("I risultati si aggiornano automaticamente mentre modifichi i parametri.",12,Color.LTGRAY,false);note.setGravity(17);note.setPadding(dp(8),dp(12),dp(8),dp(22));root.addView(note);
+    TextView credits=txt("CREDITI\nATIA FOOD DEVICE\nwww.atiafooddevice.com",12,Color.WHITE,true);credits.setGravity(17);credits.setLineSpacing(dp(3),1);credits.setBackground(box(PANEL,ORANGE,12));credits.setPadding(dp(12),dp(15),dp(12),dp(15));credits.setOnClickListener(v->startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.atiafooddevice.com"))));root.addView(credits);
+    return sv;
+  }
 
-        TextView brand = text("ATIA", 34, Color.rgb(0,75,135), true);
-        brand.setGravity(Gravity.CENTER);
-        root.addView(brand);
-        TextView title = text("Nastro Calculator", 21, Color.rgb(0,47,87), true);
-        title.setGravity(Gravity.CENTER);
-        root.addView(title);
-        TextView sub = text("Calcolo trasmissione e velocità del nastro", 14, Color.DKGRAY, false);
-        sub.setGravity(Gravity.CENTER);
-        sub.setPadding(0, 0, 0, dp(18));
-        root.addView(sub);
-
-        motorRpm = field(root, "Giri motore (rpm)", "1400");
-        reduction = field(root, "Rapporto di riduzione (es. 30 = 1:30)", "30");
-        diameterMm = field(root, "Diametro rullo (mm)", "80");
-        beltLengthMm = field(root, "Lunghezza totale nastro (mm)", "1000");
-        targetSpeed = field(root, "Velocità desiderata (m/min) — opzionale", "");
-
-        Button calc = button("CALCOLA PARAMETRI");
-        calc.setOnClickListener(v -> calculate());
-        root.addView(calc);
-
-        Button ratio = button("CALCOLA RAPPORTO NECESSARIO");
-        ratio.setOnClickListener(v -> calculateRatio());
-        root.addView(ratio);
-
-        output = text("Inserisci i dati e premi CALCOLA.", 16, Color.rgb(0,47,87), false);
-        output.setBackgroundColor(Color.WHITE);
-        output.setPadding(dp(16), dp(16), dp(16), dp(16));
-        LinearLayout.LayoutParams outParams = new LinearLayout.LayoutParams(-1, -2);
-        outParams.setMargins(0, dp(12), 0, dp(20));
-        root.addView(output, outParams);
-
-        TextView creditsTitle = text("CREDITI", 13, Color.rgb(0,75,135), true);
-        creditsTitle.setGravity(Gravity.CENTER);
-        root.addView(creditsTitle);
-        TextView creditsLogo = text("ATIA", 28, Color.rgb(0,75,135), true);
-        creditsLogo.setGravity(Gravity.CENTER);
-        creditsLogo.setPadding(0, dp(4), 0, 0);
-        root.addView(creditsLogo);
-        TextView credits = text("ATIA Food Device\nwww.atiafooddevice.com", 14, Color.DKGRAY, false);
-        credits.setGravity(Gravity.CENTER);
-        credits.setPadding(0, dp(2), 0, dp(24));
-        credits.setOnClickListener(v -> {
-            Intent browser = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.atiafooddevice.com"));
-            startActivity(browser);
-        });
-        root.addView(credits);
-        return scroll;
-    }
-
-    private EditText field(LinearLayout root, String label, String initial) {
-        TextView l = text(label, 14, Color.rgb(0,47,87), true);
-        root.addView(l);
-        EditText e = new EditText(this);
-        e.setText(initial);
-        e.setTextSize(18);
-        e.setSingleLine(true);
-        e.setSelectAllOnFocus(true);
-        e.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(52));
-        p.setMargins(0, dp(3), 0, dp(11));
-        root.addView(e, p);
-        return e;
-    }
-
-    private Button button(String label) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextColor(Color.WHITE);
-        b.setTextSize(14);
-        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        b.setBackgroundColor(Color.rgb(0,75,135));
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(52));
-        p.setMargins(0, dp(6), 0, dp(6));
-        b.setLayoutParams(p);
-        return b;
-    }
-
-    private void calculate() {
-        try {
-            double rpm = value(motorRpm), red = value(reduction), d = value(diameterMm), len = value(beltLengthMm);
-            requirePositive(rpm, red, d, len);
-            double rollerRpm = rpm / red;
-            double circumferenceM = Math.PI * d / 1000.0;
-            double mMin = circumferenceM * rollerRpm;
-            double mSec = mMin / 60.0;
-            double cycleSec = (len / 1000.0) / mSec;
-            output.setText(String.format(Locale.ITALY,
-                "RISULTATI\n\nGiri rullo: %.2f rpm\nCirconferenza rullo: %.1f mm\nVelocità nastro: %.3f m/s\nVelocità nastro: %.2f m/min\nTempo percorrenza nastro: %.2f s\nTempo per metro: %.2f s",
-                rollerRpm, Math.PI*d, mSec, mMin, cycleSec, 1.0/mSec));
-        } catch (Exception e) { error(); }
-    }
-
-    private void calculateRatio() {
-        try {
-            double rpm = value(motorRpm), d = value(diameterMm), wanted = value(targetSpeed);
-            requirePositive(rpm, d, wanted);
-            double rollerNeeded = wanted / (Math.PI * d / 1000.0);
-            double ratioNeeded = rpm / rollerNeeded;
-            reduction.setText(String.format(Locale.US, "%.3f", ratioNeeded));
-            output.setText(String.format(Locale.ITALY,
-                "RAPPORTO NECESSARIO\n\nRapporto teorico: 1 : %.3f\nGiri rullo richiesti: %.2f rpm\nVelocità impostata: %.2f m/min\n\nIl rapporto è stato copiato nel relativo campo.",
-                ratioNeeded, rollerNeeded, wanted));
-        } catch (Exception e) { error(); }
-    }
-
-    private double value(EditText e) { return Double.parseDouble(e.getText().toString().trim().replace(',', '.')); }
-    private void requirePositive(double... values) { for (double v : values) if (v <= 0) throw new IllegalArgumentException(); }
-    private void error() { Toast.makeText(this, "Controlla i valori inseriti: devono essere numeri maggiori di zero.", Toast.LENGTH_LONG).show(); }
-    private TextView text(String s, int sp, int color, boolean bold) {
-        TextView t = new TextView(this); t.setText(s); t.setTextSize(sp); t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD); return t;
-    }
-    private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+  EditText field(LinearLayout root,String label,String unit,String fallback,String key){
+    LinearLayout c=row();c.setGravity(Gravity.CENTER_VERTICAL);c.setPadding(dp(14),dp(7),dp(10),dp(7));c.setBackground(box(PANEL,Color.rgb(55,55,55),12));
+    TextView l=txt(label,12,Color.WHITE,true);l.setGravity(Gravity.CENTER_VERTICAL);c.addView(l,new LinearLayout.LayoutParams(0,dp(48),1));
+    EditText e=new EditText(this);e.setText(prefs.getString(key,fallback));e.setSelectAllOnFocus(true);e.setSingleLine();e.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);e.setTextColor(Color.WHITE);e.setTextSize(19);e.setBackgroundColor(Color.TRANSPARENT);e.setInputType(2|8192);c.addView(e,new LinearLayout.LayoutParams(dp(92),dp(48)));
+    TextView u=txt(unit,11,ORANGE,true);u.setGravity(17);c.addView(u,new LinearLayout.LayoutParams(dp(58),dp(48)));
+    LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(64));p.setMargins(0,0,0,dp(8));root.addView(c,p);return e;
+  }
+  TextView result(LinearLayout row,String label,String initial){LinearLayout b=column();b.setGravity(17);b.setPadding(dp(6),dp(12),dp(6),dp(12));b.setBackground(box(PANEL,ORANGE,12));TextView l=txt(label,10,ORANGE,true);l.setGravity(17);b.addView(l);TextView v=txt(initial,19,Color.WHITE,true);v.setGravity(17);v.setPadding(0,dp(5),0,0);b.addView(v);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(92),1);p.setMargins(dp(4),dp(4),dp(4),dp(4));row.addView(b,p);return v;}
+  void watch(){TextWatcher w=new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){if(!internal)calculate();}public void afterTextChanged(Editable e){}};motor.addTextChangedListener(w);reduction.addTextChangedListener(w);diameter.addTextChangedListener(w);length.addTextChangedListener(w);}
+  void calculate(){try{double rpm=n(motor),red=n(reduction),d=n(diameter),len=n(length);if(rpm<=0||red<=0||d<=0||len<=0)throw new Exception();double roller=rpm/red,mMin=Math.PI*d/1000*roller,mSec=mMin/60,seconds=(len/1000)/mSec;rollerOut.setText(f("%.1f rpm",roller));speedOut.setText(f("%.2f m/min",mMin));timeOut.setText(f("%.2f s",seconds));ratioOut.setText(f("1 : %.2f",red));belt.speed=(float)mMin;}catch(Exception e){rollerOut.setText("— rpm");speedOut.setText("— m/min");timeOut.setText("— s");ratioOut.setText("1 : —");belt.speed=0;}}
+  void requiredRatio(){try{double rpm=n(motor),d=n(diameter),wanted=n(target);if(rpm<=0||d<=0||wanted<=0)throw new Exception();double need=rpm/(wanted/(Math.PI*d/1000));internal=true;reduction.setText(String.format(Locale.US,"%.3f",need));internal=false;calculate();}catch(Exception e){target.requestFocus();}}
+  class BeltView extends View{Paint p=new Paint(3);float phase,speed;long last=System.nanoTime();BeltView(){super(MainActivity.this);setBackground(box(Color.rgb(8,8,8),ORANGE,14));}
+    protected void onDraw(Canvas c){super.onDraw(c);float w=getWidth(),h=getHeight(),left=w*.1f,right=w*.9f,y=h*.6f,r=h*.16f;long now=System.nanoTime();float dt=(now-last)/1e9f;last=now;phase=(phase+dt*(24+Math.min(speed,120)*1.8f))%42;p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(5));p.setColor(Color.rgb(65,65,65));c.drawLine(left,y-r,right,y-r,p);c.drawLine(left,y+r,right,y+r,p);p.setStrokeWidth(dp(4));p.setColor(ORANGE);c.drawCircle(left,y,r,p);c.drawCircle(right,y,r,p);p.setStrokeWidth(dp(3));for(float x=left-r-phase;x<right+r;x+=42)c.drawLine(x,y-r-dp(5),x+dp(13),y-r+dp(5),p);p.setStyle(Paint.Style.FILL);for(int i=0;i<3;i++){float span=right-left,x=left+((phase*2+i*span/3)%span);c.drawRoundRect(x-dp(11),y-r-dp(20),x+dp(11),y-r,dp(4),dp(4),p);}p.setColor(Color.WHITE);p.setTextAlign(Paint.Align.CENTER);p.setTypeface(Typeface.DEFAULT_BOLD);p.setTextSize(dp(13));c.drawText(speed>0?f("FLUSSO  %.2f m/min",speed):"NASTRO FERMO",w/2,h*.2f,p);postInvalidateDelayed(16);}}
+  TextView section(String s){TextView t=txt(s,12,ORANGE,true);t.setLetterSpacing(.08f);t.setPadding(dp(2),dp(12),0,dp(9));return t;}
+  LinearLayout column(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.VERTICAL);return l;}LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.HORIZONTAL);return l;}
+  GradientDrawable box(int fill,int stroke,int radius){GradientDrawable g=new GradientDrawable();g.setColor(fill);g.setCornerRadius(dp(radius));g.setStroke(dp(1),stroke);return g;}
+  TextView txt(String s,int size,int color,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(Typeface.DEFAULT,1);return t;}
+  double n(EditText e){return Double.parseDouble(s(e).trim().replace(',','.'));}String s(EditText e){return e.getText().toString();}String f(String x,Object...v){return String.format(Locale.ITALY,x,v);}int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
 }
